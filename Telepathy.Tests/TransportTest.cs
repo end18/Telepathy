@@ -425,7 +425,7 @@ namespace Telepathy.Tests
                 server.Send(id, new ArraySegment<byte>(bytes));
 
             // now receive on server.
-            // when hitting the limit, the connection disconnect.
+            // when hitting the limit, the connection disconnects.
             // => so the next message should be a disconnect message.
             Message dataMsg = NextMessage(server);
             Assert.That(dataMsg.eventType, Is.EqualTo(EventType.Disconnected));

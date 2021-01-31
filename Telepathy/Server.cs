@@ -269,6 +269,7 @@ namespace Telepathy
                     // disconnect if send queue gets too big.
                     // -> avoids ever growing queue memory if network is slower
                     //    than input
+                    // -> avoids ever growing latency as well
                     // -> disconnecting is great for load balancing. better to
                     //    disconnect one connection than risking every
                     //    connection / the whole server

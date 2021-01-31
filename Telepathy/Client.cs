@@ -197,18 +197,40 @@ namespace Telepathy
                 // respect max message size to avoid allocation attacks.
                 if (message.Count <= MaxMessageSize)
                 {
-                    // ArraySegment array is only valid until returning, so copy
-                    // it into a byte[] that we can queue safely.
-                    // TODO byte[] pool later!
-                    byte[] data = new byte[message.Count];
-                    Buffer.BlockCopy(message.Array, message.Offset, data, 0, message.Count);
+                    // check send queue limit
+                    if (sendQueue.Count < queueLimit)
+                    {
+                        // ArraySegment array is only valid until returning, so copy
+                        // it into a byte[] that we can queue safely.
+                        // TODO byte[] pool later!
+                        byte[] data = new byte[message.Count];
+                        Buffer.BlockCopy(message.Array, message.Offset, data, 0, message.Count);
 
-                    // add to send queue and return immediately.
-                    // calling Send here would be blocking (sometimes for long
-                    // times if other side lags or wire was disconnected)
-                    sendQueue.Enqueue(data);
-                    sendPending.Set(); // interrupt SendThread WaitOne()
-                    return true;
+                        // add to send queue and return immediately.
+                        // calling Send here would be blocking (sometimes for long
+                        // times if other side lags or wire was disconnected)
+                        sendQueue.Enqueue(data);
+                        sendPending.Set(); // interrupt SendThread WaitOne()
+                        return true;
+                    }
+                    // disconnect if send queue gets too big.
+                    // -> avoids ever growing queue memory if network is slower
+                    //    than input
+                    // -> avoids ever growing latency as well
+                    //
+                    // note: while SendThread always grabs the WHOLE send queue
+                    //       immediately, it's still possible that the sending
+                    //       blocks for so long that the send queue just gets
+                    //       way too big. have a limit - better safe than sorry.
+                    else
+                    {
+                        // log the reason
+                        Log.Warning($"Client.Send: sendQueue for reached limit of {queueLimit}. This can happen if we call send faster than the network can process messages. Disconnecting to avoid ever growing memory & latency.");
+
+                        // just close it. send thread will take care of the rest.
+                        client.Close();
+                        return false;
+                    }
                 }
                 Log.Error("Client.Send: message too big: " + message.Count + ". Limit: " + MaxMessageSize);
                 return false;

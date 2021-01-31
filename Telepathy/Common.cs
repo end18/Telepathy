@@ -16,14 +16,16 @@ namespace Telepathy
         // queue count, useful for debugging / benchmarks
         public int ReceiveQueueCount => receiveQueue.Count;
 
-        // warning if message queue gets too big
-        // if the average message is about 20 bytes then:
-        // -   1k messages are   20KB
-        // -  10k messages are  200KB
-        // - 100k messages are 1.95MB
-        // 2MB are not that much, but it is a bad sign if the caller process
-        // can't call GetNextMessage faster than the incoming messages.
-        public static int messageQueueSizeWarning = 100000;
+        // disconnect if message queue gets too big.
+        // -> avoids ever growing queue memory if network is slower than input
+        // -> disconnecting is great for load balancing. better to disconnect
+        //    one connection than risking every connection / the whole server
+        // -> huge queue would introduce multiple seconds of latency anyway
+        //
+        // Mirror/DOTSNET use MaxMessageSize batching, so for a 16kb max size:
+        //   limit =  1,000 means  16 MB of memory/connection
+        //   limit = 10,000 means 160 MB of memory/connection
+        public readonly int queueLimit;
 
         // removes and returns the oldest message from the message queue.
         // (might want to call this until it doesn't return anything anymore)
@@ -63,6 +65,12 @@ namespace Telepathy
         // -> we use a List because it automatically grows internally as needed
         // -> won't allocate in hot path except when occasionally growing it
         List<byte[]> dequeueList = new List<byte[]>();
+
+        // constructor /////////////////////////////////////////////////////////
+        protected Common(int queueLimit)
+        {
+            this.queueLimit = queueLimit;
+        }
 
         // helper functions ////////////////////////////////////////////////////
         // send message (via stream) with the <size,content> message structure
@@ -150,9 +158,6 @@ namespace Telepathy
             // get NetworkStream from client
             NetworkStream stream = client.GetStream();
 
-            // keep track of last message queue warning
-            DateTime messageQueueLastWarning = DateTime.Now;
-
             // absolutely must wrap with try/catch, otherwise thread exceptions
             // are silent
             try
@@ -188,20 +193,25 @@ namespace Telepathy
                     // queue it
                     receiveQueue.Enqueue(new Message(connectionId, EventType.Data, content));
 
-                    // and show a warning if the queue gets too big
-                    // -> we don't want to show a warning every single time,
-                    //    because then a lot of processing power gets wasted on
-                    //    logging, which will make the queue pile up even more.
-                    // -> instead we show it every 10s, so that the system can
-                    //    use most it's processing power to hopefully process it.
-                    if (receiveQueue.Count > messageQueueSizeWarning)
+                    // disconnect if receive queue gets too big.
+                    // -> avoids ever growing queue memory if network is slower
+                    //    than input
+                    // -> disconnecting is great for load balancing. better to
+                    //    disconnect one connection than risking every
+                    //    connection / the whole server
+                    if (receiveQueue.Count >= queueLimit)
                     {
-                        TimeSpan elapsed = DateTime.Now - messageQueueLastWarning;
-                        if (elapsed.TotalSeconds > 10)
-                        {
-                            Log.Warning("ReceiveLoop: messageQueue is getting big(" + receiveQueue.Count + "), try calling GetNextMessage more often. You can call it more than once per frame!");
-                            messageQueueLastWarning = DateTime.Now;
-                        }
+                        // log the reason
+                        Log.Warning($"receiveQueue reached limit of {queueLimit}. This can happen if network messages come in way faster than we manage to process them. Disconnecting this connection for load balancing.");
+
+                        // clear queue so the final disconnect message will be
+                        // processed immediately. no need to process thousands
+                        // of pending messages before disconnecting.
+                        // it would just delay it for quite some time.
+                        receiveQueue.Clear();
+
+                        // just break. the finally{} will close everything.
+                        break;
                     }
                 }
             }

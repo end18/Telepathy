@@ -41,6 +41,9 @@ namespace Telepathy
         // -> call WaitOne() to block until Reset was called
         ManualResetEvent sendPending = new ManualResetEvent(false);
 
+        // constructor
+        public Client(int queueLimit = 10000) : base(queueLimit) {}
+
         // the thread function
         void ReceiveThreadFunction(string ip, int port)
         {

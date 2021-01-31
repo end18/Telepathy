@@ -330,6 +330,42 @@ namespace Telepathy.Tests
         }
 
         [Test]
+        public void ReceiveQueueLimitDisconnects()
+        {
+            // let's use an extremely small limit:
+            // barely enough for Connect + Data
+            int queueLimit = 2;
+
+            // stop [SetUp] server, recreate with limit
+            server.Stop();
+            server = new Server(queueLimit);
+            server.Start(port);
+
+            // connect a client
+            Client client = new Client();
+            client.Connect("127.0.0.1", port);
+
+            // we should first receive a connected message
+            Message serverConnectMsg = NextMessage(server);
+            int id = serverConnectMsg.connectionId;
+
+            // send exactly 'limit' messages to fill server's receive queue
+            byte[] bytes = {0x01, 0x02};
+            for (int i = 0; i < queueLimit; ++i)
+                client.Send(new ArraySegment<byte>(bytes));
+
+            // now receive on server.
+            // when hitting the limit, the connection should clear the receive
+            // queue and disconnect.
+            // => so the next message should be a disconnect message.
+            Message dataMsg = NextMessage(server);
+            Assert.That(dataMsg.eventType, Is.EqualTo(EventType.Disconnected));
+
+            // done
+            client.Disconnect();
+        }
+
+        [Test]
         public void ServerStartStopTest()
         {
             // create a server that only starts and stops without ever accepting

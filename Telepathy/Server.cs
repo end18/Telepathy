@@ -256,12 +256,36 @@ namespace Telepathy
                 ClientToken token;
                 if (clients.TryGetValue(connectionId, out token))
                 {
-                    // add to send queue and return immediately.
-                    // calling Send here would be blocking (sometimes for long
-                    // times if other side lags or wire was disconnected)
-                    token.sendQueue.Enqueue(data);
-                    token.sendPending.Set(); // interrupt SendThread WaitOne()
-                    return true;
+                    // check send queue limit
+                    if (token.sendQueue.Count < queueLimit)
+                    {
+                        // add to send queue and return immediately.
+                        // calling Send here would be blocking (sometimes for long
+                        // times if other side lags or wire was disconnected)
+                        token.sendQueue.Enqueue(data);
+                        token.sendPending.Set(); // interrupt SendThread WaitOne()
+                        return true;
+                    }
+                    // disconnect if send queue gets too big.
+                    // -> avoids ever growing queue memory if network is slower
+                    //    than input
+                    // -> disconnecting is great for load balancing. better to
+                    //    disconnect one connection than risking every
+                    //    connection / the whole server
+                    //
+                    // note: while SendThread always grabs the WHOLE send queue
+                    //       immediately, it's still possible that the sending
+                    //       blocks for so long that the send queue just gets
+                    //       way too big. have a limit - better safe than sorry.
+                    else
+                    {
+                        // log the reason
+                        Log.Warning($"Server.Send: sendQueue for connection {connectionId} reached limit of {queueLimit}. This can happen if we call send faster than the network can process messages. Disconnecting this connection for load balancing.");
+
+                        // just close it. send thread will take care of the rest.
+                        token.client.Close();
+                        return false;
+                    }
                 }
 
                 // sending to an invalid connectionId is expected sometimes.

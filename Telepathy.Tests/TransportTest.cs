@@ -330,7 +330,7 @@ namespace Telepathy.Tests
         }
 
         [Test]
-        public void ReceiveQueueLimitDisconnects()
+        public void ServerReceiveQueueLimitDisconnects()
         {
             // let's use an extremely small limit:
             // barely enough for Connect + Data
@@ -366,7 +366,7 @@ namespace Telepathy.Tests
         }
 
         [Test]
-        public void SendQueueLimitDisconnects()
+        public void ServerSendQueueLimitDisconnects()
         {
             // let's use an extremely small limit
             int queueLimit = 2;
